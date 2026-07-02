@@ -1,0 +1,37 @@
+node_modules
+# Keep environment variables out of version control
+.env
+*.bak
+
+/generated/prisma
+
+# Local build/runtime artifacts
+.DS_Store
+dist/
+.trae/
+*.db
+*.db.*
+*.log
+admin_token.txt
+.superpowers/
+
+# release packages
+Exchange_js-release-*.zip
+node_modules/
+admin-web/node_modules/
+client-web/node_modules/
+
+.env
+admin-web/.env
+client-web/.env
+
+dist/
+admin-web/dist/
+client-web/dist/
+
+prisma/dev.db
+dev.db
+
+*.log
+.DS_Store
+.vite/

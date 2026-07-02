@@ -1,0 +1,2160 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                  String                @id @default(uuid())
+  userNo              String                @unique @default("TEMP")
+  email               String
+  password            String
+  // Legacy: single-role string kept for JWT backward compatibility.
+  // Authoritative RBAC is resolved via userRoles → roles → role_permissions.
+  // auth.service.ts includes this field in JWT roleCodes for tokens issued
+  // before the roleCodes claim existed. Safe to remove only after all
+  // active sessions have been refreshed.
+  role                String
+  status              String
+  failedLoginAttempts Int                   @default(0)
+  lockedUntil         DateTime?
+  suspendedAt         DateTime?
+  lastLoginAt         DateTime?
+  deletedAt           DateTime?
+  deletedBy           String?
+  createdAt           DateTime              @default(now())
+  updatedAt           DateTime              @updatedAt
+  userRoles           UserRole[]
+  adminInvitations    AdminUserInvitation[]
+  passwordResetTokens PasswordResetToken[]
+  roleChangeRequests  AdminRoleChangeRequest[] @relation("roleChangeTarget")
+
+  firstLoginStatus     String    @default("PENDING_IDENTITY_CONFIRM")
+  mfaSecret            String?
+  mfaEnabledAt         DateTime?
+  mfaVerifyFailCount   Int       @default(0)
+  mfaVerifyLockedUntil DateTime?
+  securityAckAt        DateTime?
+  firstLoginTraceId    String?
+
+  @@index([deletedAt])
+  @@map("users")
+}
+
+model Role {
+  id                       String           @id @default(uuid())
+  code                     String           @unique
+  name                     String
+  description              String?
+  status                   String           @default("ACTIVE")
+  approvalCaseId           String?
+  approvalCaseNo           String?
+  proposedPermissionGroups String?
+  createdAt                DateTime         @default(now())
+  updatedAt                DateTime         @updatedAt
+  rolePermissions          RolePermission[]
+  userRoles                UserRole[]
+  modifyRequests           RoleDefinitionModifyRequest[]
+
+  @@map("roles")
+}
+
+model Permission {
+  id              String           @id @default(uuid())
+  code            String           @unique
+  name            String
+  description     String?
+  method          String
+  path            String
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  rolePermissions RolePermission[]
+
+  @@map("permissions")
+}
+
+model RolePermission {
+  id           String     @id @default(uuid())
+  roleId       String
+  permissionId String
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+  role         Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@unique([roleId, permissionId])
+  @@index([roleId])
+  @@index([permissionId])
+  @@map("role_permissions")
+}
+
+model UserRole {
+  id        String   @id @default(uuid())
+  userId    String
+  roleId    String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role      Role     @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, roleId])
+  @@index([userId])
+  @@index([roleId])
+  @@map("user_roles")
+}
+
+model AdminUserInvitation {
+  id              String    @id @default(uuid())
+  userId          String
+  token           String?
+  tokenHash       String    @unique
+  expiresAt       DateTime
+  consumedAt      DateTime?
+  revokedAt       DateTime?
+  createdByUserId String?
+  workflowType    String?
+  workflowNo      String?
+  traceId         String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@index([traceId])
+  @@map("admin_user_invitations")
+}
+
+model PasswordResetToken {
+  id                String    @id @default(uuid())
+  resetNo           String    @unique @default("TEMP")
+  userId            String
+  tokenHash         String    @unique
+  token             String?
+  status            String    @default("PENDING")
+  requestSource     String
+  requestedByUserId String?
+  requestedByUserNo String?
+  expiresAt         DateTime
+  consumedAt        DateTime?
+  traceId           String
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, status, expiresAt])
+  @@index([traceId, createdAt])
+  @@map("password_reset_tokens")
+}
+
+model AdminRoleChangeRequest {
+  id                String    @id @default(uuid())
+  requestNo         String    @unique @default("TEMP")
+  targetUserId      String
+  currentRoleCodes  String
+  proposedRoleCodes String
+  changeReason      String
+  status            String    @default("PENDING_APPROVAL")
+  approvalCaseId    String?
+  approvalCaseNo    String?
+  requestedByUserId String
+  executedAt        DateTime?
+  failureReason     String?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  deletedAt         DateTime?
+
+  targetUser        User      @relation("roleChangeTarget", fields: [targetUserId], references: [id])
+
+  @@index([targetUserId])
+  @@index([approvalCaseId])
+  @@index([status])
+  @@index([requestedByUserId])
+  @@map("admin_role_change_requests")
+}
+
+model CustomerMain {
+  // ═══ 身份 ═══
+  id              String    @id @default(uuid())
+  customerNo      String    @unique @default("TEMP")
+  customerType    String    @default("INDIVIDUAL")
+  email           String?   @unique
+  phone           String?   @unique
+  emailVerifiedAt DateTime?
+  phoneVerifiedAt DateTime?
+  firstName       String?
+  lastName        String?
+  companyName     String?
+
+  // ═══ 认证 / 安全 ═══
+  passwordHash      String?
+  passwordUpdatedAt DateTime?
+  failedLoginCount  Int       @default(0)
+  lockedUntil       DateTime?
+  lastLoginAt       DateTime?
+  lastLoginIp       String?
+  locale            String?
+  timezone          String?
+  termsAcceptedAt   DateTime?
+
+  // ═══ 状态轴 1：准入旅程 ═══
+  onboardingStatus  String    @default("NONE")
+  onboardingTraceId String?
+
+  // ═══ 状态轴 2：行政生命周期 ═══
+  adminStatus       String    @default("INACTIVE")
+  suspendedReason   String?
+  suspendedAt       DateTime?
+
+  // ═══ 状态轴 3：合规冻结 ═══
+  complianceStatus           String    @default("CLEAR")
+  complianceFreezeReason     String?
+  complianceFreezeCaseId     String?
+  complianceFreezeAt         DateTime?
+  complianceFreezeReleasedAt DateTime?
+
+  // ═══ 细粒度限制 ═══
+  restrictions String @default("[]")
+
+  // ═══ 产品属性 ═══
+  investorTier          String    @default("STANDARD")
+  investorTierSource    String    @default("ONBOARDING")
+  investorTierUpdatedAt DateTime?
+
+  // Trading limits (2026-05-16)
+  tradingTier              String   @default("BASIC")    // BASIC | PREMIUM
+  riskLevel                String   @default("LOW")      // LOW | MEDIUM | HIGH
+  sumsubVerificationLevel  Int      @default(1)           // 1 | 2
+
+  // ═══ 合规属性 ═══
+  riskRating          String    @default("LOW")
+  riskRatingUpdatedAt DateTime?
+  eddRequired         Boolean   @default(false)
+  pepStatus           String    @default("NONE")
+  pepConfirmedAt      DateTime?
+  cddDocumentExpiresAt DateTime?
+
+  // ═══ Sumsub 集成 ═══
+  sumsubApplicantId                  String?   @unique
+  sumsubCurrentLevelName             String?
+  sumsubLatestReviewId               String?
+  sumsubLatestAttemptId              String?
+  sumsubExperiencedLevel2            Boolean   @default(false)
+  verificationProvider               String?
+  verificationSubstatus              String?
+  verificationCustomerActionRequired Boolean   @default(false)
+  verificationCanContinue            Boolean   @default(false)
+  verificationLatestEventType        String?
+  verificationLatestEventAt          DateTime?
+
+  // ═══ 工作流指针 ═══
+  latestRiskApprovalId        String?   @unique
+  latestRiskApprovalStatus    String?
+  latestRiskAssessmentId      String?
+  nextReviewAt                DateTime?
+
+  // ═══ 时间戳 ═══
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // ═══ Relations ═══
+  depositTransactions       DepositTransaction[]
+  swapTransactions          SwapTransaction[]
+  withdrawTransactions      WithdrawTransaction[]
+  payouts                   Payout[]
+  payins                    Payin[]
+  inboundTransferSignals    InboundTransferSignal[]
+  corporateProfile          CorporateProfile?
+  uboProfiles               UboProfile[]
+  latestRiskApproval        ApprovalCase?            @relation("CustomerLatestRiskApproval", fields: [latestRiskApprovalId], references: [id], onDelete: SetNull)
+  materialHoldings          CustomerMaterialHolding[] @relation("CustomerMaterialHoldings")
+  materialRefreshCycles     MaterialRefreshCycle[]   @relation("CustomerMaterialRefreshCycles")
+  riskAssessments           ClientRiskAssessment[]   @relation("CustomerRiskAssessments")
+  tierUpgradeCases          TierUpgradeCase[]        @relation("CustomerTierUpgradeCases")
+  withdrawalAddresses       WithdrawalAddress[]
+  withdrawalFeeLevelBindings  WithdrawalFeeLevelBinding[]
+  swapFeeLevelBindings        SwapFeeLevelBinding[]
+
+  @@index([adminStatus])
+  @@index([complianceStatus])
+  @@index([riskRating])
+  @@map("customer_main")
+}
+
+model CorporateProfile {
+  id                       String   @id @default(uuid())
+  customerId               String   @unique
+  companyName              String
+  registrationNo           String
+  incorporationCountry     String
+  registeredAddress        String?
+  licenseType              String?
+  licenseNumber            String?
+  authorizedSignatoryName  String?
+  authorizedSignatoryTitle String?
+  documents                String? // JSON array
+  createdAt                DateTime @default(now())
+  updatedAt                DateTime @updatedAt
+
+  customer CustomerMain @relation(fields: [customerId], references: [id])
+
+  @@map("corporate_profiles")
+}
+
+model UboProfile {
+  id               String   @id @default(uuid())
+  customerId       String
+  fullName         String
+  ownershipPercent Decimal?
+  nationality      String?
+  idNumber         String?
+  pepFlag          Boolean  @default(false)
+  status           String   @default("PENDING") // PENDING, CDD_IN_PROGRESS, CDD_APPROVED, EDD_IN_PROGRESS, EDD_APPROVED, REJECTED
+  documents        String? // JSON array
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  customer CustomerMain @relation(fields: [customerId], references: [id])
+
+  @@index([customerId])
+  @@map("ubo_profiles")
+}
+
+model AuditLogEvent {
+  id              String              @id @default(uuid())
+  auditNo         String              @unique @default("TEMP")
+  action          String
+  entityType      String
+  entityId        String?
+  entityNo        String?
+  traceId         String?
+  workflowType    String?
+  entityOwnerType String?
+  entityOwnerId   String?
+  actorType       String
+  actorId         String
+  actorNo         String?
+  actorRole       String?
+  requestId       String?
+  sourceIp        String?
+  sourcePlatform  String?
+  result          String              @default("SUCCESS")
+  reason          String?
+  metadata        String?
+  idempotencyKey  String?             @unique
+  payloadDigest   String
+  retainedUntil   DateTime
+  entityOwnerNo   String?
+  archivedAt      DateTime?
+  occurredAt      DateTime            @default(now())
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+  @@index([occurredAt])
+  @@index([entityType, entityId])
+  @@index([actorType, actorId])
+  @@index([actorType, actorId, occurredAt])
+  @@index([actorNo, occurredAt])
+  @@index([entityOwnerNo, occurredAt])
+  @@index([traceId, occurredAt])
+  @@index([workflowType, occurredAt])
+  @@index([result, occurredAt])
+  @@index([retainedUntil])
+  @@index([archivedAt])
+  @@map("audit_log_events")
+}
+
+model AuditEvidencePackage {
+  id                       String        @id @default(uuid())
+  packageNo                String        @unique @default("TEMP")
+  approvalCaseId           String?       @unique
+  approvalCaseNo           String?
+  exportedByType           String
+  exportedById             String
+  exportedByNo             String?
+  exportedByRole           String?
+  status                   String        @default("READY")
+  exportMode               String        @default("SELECTION")
+  fileName                 String?
+  filterSnapshot           String?
+  selectedEventIdsSnapshot String?
+  itemCount                Int
+  digest                   String
+  manifest                 String
+  packageBody              String?
+  deletedAt                DateTime?
+  deletedBy                String?
+  createdAt                DateTime      @default(now())
+  updatedAt                DateTime      @updatedAt
+  approvalCase             ApprovalCase? @relation("AuditEvidencePackageApprovalCase", fields: [approvalCaseId], references: [id], onDelete: SetNull)
+
+  @@index([createdAt])
+  @@index([exportedByType, exportedById])
+  @@index([status, createdAt])
+  @@index([exportMode, createdAt])
+  @@index([approvalCaseId])
+  @@index([approvalCaseNo])
+  @@index([deletedAt])
+  @@map("audit_evidence_packages")
+}
+
+model ApprovalCase {
+  id                             String                         @id @default(uuid())
+  approvalNo                     String                         @unique
+  actionType                     String
+  entityRef                      String
+  createdByUserId                String
+  createdByUserNo                String?
+  status                         String                         @default("DRAFT")
+  allowCancel                    Boolean                        @default(true)
+  objectSnapshot                 String?
+  traceId                        String
+  createdAt                      DateTime                       @default(now())
+  updatedAt                      DateTime                       @updatedAt
+  submittedAt                    DateTime?
+  timeoutAt                      DateTime?
+  steps                          ApprovalStep[]
+  evidencePackage                AuditEvidencePackage?          @relation("AuditEvidencePackageApprovalCase")
+  latestForCustomerRiskApproval  CustomerMain?                  @relation("CustomerLatestRiskApproval")
+  riskAssessments                ClientRiskAssessment[]         @relation("ClientRiskAssessmentApprovalCase")
+  linkedRegulatoryGates          RegulatoryGateItem[]           @relation("RegulatoryGateLinkedApproval")
+  internalTransactionForApproval InternalTransaction?           @relation("InternalTransactionApprovalCase")
+  tierUpgradeCaseApproval        TierUpgradeCase?               @relation("TierUpgradeCaseApproval")
+
+  @@index([actionType, entityRef, status])
+  @@index([status, timeoutAt])
+  @@index([traceId, createdAt])
+  @@map("approval_cases")
+}
+
+model ApprovalStep {
+  id                    String       @id @default(uuid())
+  approvalCaseId        String
+  stepNo                Int
+  status                String       @default("PENDING")
+  checkerRoleCandidates String
+  decidedByUserId       String?
+  decidedByUserNo       String?
+  decidedByRole         String?
+  reason                String?
+  decidedAt             DateTime?
+  createdAt             DateTime     @default(now())
+  updatedAt             DateTime     @updatedAt
+  approvalCase          ApprovalCase @relation(fields: [approvalCaseId], references: [id], onDelete: Cascade)
+
+  @@unique([approvalCaseId, stepNo])
+  @@index([approvalCaseId, stepNo])
+  @@map("approval_steps")
+}
+
+model ApprovalActionPolicy {
+  actionType   String   @id
+  riskLevel    String   @default("HIGH")
+  checkerRoles String
+  stepsConfig  String?
+  timeoutHours Int      @default(24)
+  allowCancel  Boolean  @default(true)
+  allowRetry   Boolean  @default(true)
+  updatedAt    DateTime @updatedAt
+
+  @@map("approval_action_policies")
+}
+
+model ApprovalSodRule {
+  ruleCode    String   @id
+  enabled     Boolean  @default(true)
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("approval_sod_rules")
+}
+
+model ApprovalPolicyChangeRequest {
+  id                   String    @id @default(uuid())
+  requestNo            String    @unique @default("TEMP")
+  targetActionType     String
+  currentCheckerRoles  String
+  proposedCheckerRoles String
+  currentStepsConfig   String?
+  proposedStepsConfig  String?
+  changeReason         String
+  status               String    @default("PENDING_APPROVAL")
+  approvalCaseId       String?
+  approvalCaseNo       String?
+  requestedByUserId    String
+  executedAt           DateTime?
+  failureReason        String?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+  deletedAt            DateTime?
+
+  @@index([targetActionType, status])
+  @@index([approvalCaseId])
+  @@index([status])
+  @@index([requestedByUserId])
+  @@map("approval_policy_change_requests")
+}
+
+model ShareholdingRegistryVersion {
+  id                   String                            @id @default(uuid())
+  registryNo           String                            @unique @default("TEMP")
+  status               String                            @default("DRAFT")
+  versionLabel         String?
+  effectiveFrom        DateTime?
+  effectiveTo          DateTime?
+  supersededById       String?
+  latestApprovalId     String?
+  latestApprovalStatus String?
+  docRef               String?
+  evidenceRef          String?
+  metadataJson         String                            @default("{}")
+  traceId              String
+  createdByUserId      String
+  updatedByUserId      String?
+  createdAt            DateTime                          @default(now())
+  updatedAt            DateTime                          @updatedAt
+  participants         ShareholdingRegistryParticipant[]
+  regulatoryGates      RegulatoryGateItem[]              @relation("RegulatoryGateShareholdingVersion")
+
+  @@index([status, createdAt])
+  @@index([registryNo, createdAt])
+  @@index([traceId, createdAt])
+  @@index([latestApprovalStatus, createdAt])
+  @@map("shareholding_registry_versions")
+}
+
+model ShareholdingRegistryParticipant {
+  id               String                      @id @default(uuid())
+  versionId        String
+  participantType  String
+  participantName  String
+  ownershipPercent Decimal?
+  controlSummary   String?
+  evidenceRef      String?
+  metadataJson     String                      @default("{}")
+  sortOrder        Int                         @default(0)
+  createdAt        DateTime                    @default(now())
+  updatedAt        DateTime                    @updatedAt
+  version          ShareholdingRegistryVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
+
+  @@index([versionId, sortOrder])
+  @@index([participantType, createdAt])
+  @@map("shareholding_registry_participants")
+}
+
+model AppointmentRecord {
+  id                   String               @id @default(uuid())
+  appointmentNo        String               @unique @default("TEMP")
+  status               String               @default("PLANNED")
+  roleType             String
+  personName           String
+  regulatedFlag        Boolean              @default(false)
+  proposedEffectiveAt  DateTime?
+  effectiveAt          DateTime?
+  endedAt              DateTime?
+  latestApprovalId     String?
+  latestApprovalStatus String?
+  docRef               String?
+  evidenceRef          String?
+  metadataJson         String               @default("{}")
+  traceId              String
+  createdByUserId      String
+  updatedByUserId      String?
+  createdAt            DateTime             @default(now())
+  updatedAt            DateTime             @updatedAt
+  regulatoryGates      RegulatoryGateItem[] @relation("RegulatoryGateAppointmentRecord")
+
+  @@index([status, createdAt])
+  @@index([appointmentNo, createdAt])
+  @@index([traceId, createdAt])
+  @@index([latestApprovalStatus, createdAt])
+  @@map("appointment_records")
+}
+
+model TrainingRecord {
+  id              String    @id @default(uuid())
+  trainingNo      String    @unique @default("TEMP")
+  status          String    @default("ASSIGNED")
+  assignee        String
+  trainingType    String
+  dueAt           DateTime?
+  completedAt     DateTime?
+  waiverReason    String?
+  evidenceRef     String?
+  metadataJson    String    @default("{}")
+  traceId         String
+  createdByUserId String
+  updatedByUserId String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([status, createdAt])
+  @@index([trainingNo, createdAt])
+  @@index([dueAt, status])
+  @@index([traceId, createdAt])
+  @@map("training_records")
+}
+
+model ConflictDisclosure {
+  id                String    @id @default(uuid())
+  disclosureNo      String    @unique @default("TEMP")
+  status            String    @default("OPEN")
+  disclosureType    String
+  disclosedByName   String
+  disclosedAt       DateTime
+  reviewDueAt       DateTime?
+  mitigationSummary String?
+  closedAt          DateTime?
+  evidenceRef       String?
+  metadataJson      String    @default("{}")
+  traceId           String
+  createdByUserId   String
+  updatedByUserId   String?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  @@index([status, createdAt])
+  @@index([disclosureNo, createdAt])
+  @@index([reviewDueAt, status])
+  @@index([traceId, createdAt])
+  @@map("conflict_disclosures")
+}
+
+model WindDownMaterialRecord {
+  id              String    @id @default(uuid())
+  materialNo      String    @unique @default("TEMP")
+  status          String    @default("ACTIVE")
+  materialType    String
+  versionLabel    String
+  effectiveAt     DateTime?
+  reviewDueAt     DateTime?
+  supersededAt    DateTime?
+  supersededById  String?
+  evidenceRef     String?
+  metadataJson    String    @default("{}")
+  traceId         String
+  createdByUserId String
+  updatedByUserId String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([status, createdAt])
+  @@index([materialNo, createdAt])
+  @@index([reviewDueAt, status])
+  @@index([traceId, createdAt])
+  @@map("wind_down_material_records")
+}
+
+model RegulatoryGateItem {
+  id                            String                       @id @default(uuid())
+  gateNo                        String                       @unique @default("TEMP")
+  gateType                      String
+  authority                     String                       @default("VARA")
+  subjectType                   String
+  subjectId                     String
+  subjectNo                     String
+  scopeSummary                  String?
+  shareholdingRegistryVersionId String?
+  appointmentRecordId           String?
+  walletId                      String?
+  linkedApprovalId              String?
+  internalApprovalStatus        String                       @default("NOT_REQUIRED")
+  filingStatus                  String                       @default("REQUIRED")
+  receiptStatus                 String                       @default("PENDING")
+  effectivenessStatus           String                       @default("BLOCKED")
+  gateResult                    String                       @default("BLOCKED")
+  filingRefNo                   String?
+  filingSubmittedAt             DateTime?
+  latestFeedback                String?
+  latestFeedbackAt              DateTime?
+  receiptType                   String?
+  receiptRefNo                  String?
+  receiptBoundAt                DateTime?
+  proposedEffectiveAt           DateTime?
+  effectiveAt                   DateTime?
+  revokedAt                     DateTime?
+  metadataJson                  String                       @default("{}")
+  traceId                       String
+  activeKey                     String?                      @unique
+  createdByUserId               String
+  updatedByUserId               String?
+  createdAt                     DateTime                     @default(now())
+  updatedAt                     DateTime                     @updatedAt
+  shareholdingRegistryVersion   ShareholdingRegistryVersion? @relation("RegulatoryGateShareholdingVersion", fields: [shareholdingRegistryVersionId], references: [id], onDelete: SetNull)
+  appointmentRecord             AppointmentRecord?           @relation("RegulatoryGateAppointmentRecord", fields: [appointmentRecordId], references: [id], onDelete: SetNull)
+  wallet                        Wallet?                      @relation("RegulatoryGateWallet", fields: [walletId], references: [id], onDelete: SetNull)
+  linkedApproval                ApprovalCase?                @relation("RegulatoryGateLinkedApproval", fields: [linkedApprovalId], references: [id], onDelete: SetNull)
+
+  @@index([gateType, createdAt])
+  @@index([subjectType, subjectId, createdAt])
+  @@index([subjectType, subjectNo, createdAt])
+  @@index([gateResult, createdAt])
+  @@index([filingStatus, receiptStatus, effectivenessStatus])
+  @@index([traceId, createdAt])
+  @@map("regulatory_gate_items")
+}
+
+
+
+model LiquidityProvider {
+  id             String                   @id
+  name           String
+  email          String?                  @unique
+  phone          String?
+  status         String                   @default("INACTIVE")
+  createdAt      DateTime                 @default(now()) @map("created_at")
+  updatedAt      DateTime                 @updatedAt @map("updated_at")
+  configurations LiquidityConfiguration[]
+
+  @@index([name])
+  @@index([status])
+  @@map("liquidity_provider")
+}
+
+model Asset {
+  id                             String                          @id @default(uuid())
+  assetNo                        String?                         @unique
+  type                           String
+  currency                       String
+  code                           String                          @unique
+  network                        String?
+  decimals                       Int
+  description                    String?
+  status                         String                          @default("ACTIVE")
+  tbLedgerId                     Int?                            @unique
+  contractAddress                String?
+  minDepositAmount               Float?
+  maxDepositAmount               Float?
+  minWithdrawAmount              Float?
+  maxWithdrawAmount              Float?
+  depositEnabled                 Boolean                         @default(true)
+  withdrawalEnabled              Boolean                         @default(true)
+  suspendedAt                    DateTime?
+  suspendReason                  String?
+  preSuspendDepositEnabled       Boolean?
+  preSuspendWithdrawalEnabled    Boolean?
+  approvalCaseId                 String?
+  approvalCaseNo                 String?
+  createdAt                      DateTime                        @default(now())
+  updatedAt                      DateTime                        @updatedAt
+  depositTransactions            DepositTransaction[]
+  fromConfigs                    LiquidityConfiguration[]        @relation("FromAsset")
+  toConfigs                      LiquidityConfiguration[]        @relation("ToAsset")
+  feeConfigs                     LiquidityConfiguration[]        @relation("FeeAsset")
+  payins                         Payin[]
+  inboundTransferSignals         InboundTransferSignal[]
+  payouts                        Payout[]
+  swapFromTransactions           SwapTransaction[]               @relation("SwapFromAsset")
+  swapToTransactions             SwapTransaction[]               @relation("SwapToAsset")
+  swapQuoteFroms                 SwapQuote[]                     @relation("SwapQuoteFromAsset")
+  swapQuoteTos                   SwapQuote[]                     @relation("SwapQuoteToAsset")
+  withdrawPricingQuotes          WithdrawPricingQuote[]
+  outstandings                   Outstanding[]
+  feeAccruals                    FeeAccrual[]
+  wallets                        Wallet[]
+  withdrawTransactions           WithdrawTransaction[]
+  internalTransactions           InternalTransaction[]
+  internalFunds                  InternalFund[]
+  reconciliationCases            ReconciliationCase[]
+  withdrawalAddresses            WithdrawalAddress[]
+  withdrawalFeeLevels            WithdrawalFeeLevel[]
+  swapFeeLevelsFrom              SwapFeeLevel[]                  @relation("SwapFeeLevelFromAsset")
+  swapFeeLevelsTo                SwapFeeLevel[]                  @relation("SwapFeeLevelToAsset")
+
+  @@unique([type, currency, network])
+  @@map("assets")
+}
+
+model Payin {
+  id                     String                  @id @default(uuid())
+  payinNo                String                  @unique @default("TEMP")
+  depositId              String?
+  type                   String                  @default("crypto")
+  status                 String
+  toWalletId             String?
+  assetId                String
+  amount                 Decimal
+  toAddress              String?
+  toIban                 String?
+  fromWalletId           String?
+  fromAddress            String?
+  fromIban               String?
+  txHash                 String?
+  confirmations          Int                     @default(0)
+  referenceNo            String?
+  providerTxnId          String?
+  receivedAt             DateTime?
+  confirmedAt            DateTime?
+  statusHistory          String?
+  traceId                String?
+  createdAt              DateTime                @default(now())
+  updatedAt              DateTime                @updatedAt
+  ownerId                String? // Added to support relation to CustomerMain
+  deposit                DepositTransaction?     @relation("PayinToDeposit")
+  toWallet               Wallet?                 @relation("PayinToWallet", fields: [toWalletId], references: [id])
+  fromWallet             Wallet?                 @relation("PayinFromWallet", fields: [fromWalletId], references: [id])
+  asset                  Asset                   @relation(fields: [assetId], references: [id])
+  customer               CustomerMain?           @relation(fields: [ownerId], references: [id])
+  inboundTransferSignals InboundTransferSignal[]
+
+  @@unique([txHash, assetId, toAddress])
+  @@index([depositId])
+  @@index([status])
+  @@index([assetId])
+  @@index([receivedAt])
+  @@index([providerTxnId])
+  @@index([txHash])
+  @@map("payins")
+}
+
+model LiquidityConfiguration {
+  id             String            @id @default(uuid())
+  lpId           String
+  fromAssetId    String
+  toAssetId      String
+  rateSourceType String
+  spreadPercent  Decimal           @default(0)
+  feePercent     Decimal           @default(0)
+  feeFixedAmount Decimal           @default(0)
+  feeAssetId     String?
+  minFromAmount  Decimal?
+  maxFromAmount  Decimal?
+  status         String            @default("ACTIVE")
+  createdAt      DateTime          @default(now()) @map("created_at")
+  updatedAt      DateTime          @updatedAt @map("updated_at")
+  lp             LiquidityProvider @relation(fields: [lpId], references: [id])
+  fromAsset      Asset             @relation("FromAsset", fields: [fromAssetId], references: [id])
+  toAsset        Asset             @relation("ToAsset", fields: [toAssetId], references: [id])
+  feeAsset       Asset?            @relation("FeeAsset", fields: [feeAssetId], references: [id])
+
+  @@index([lpId])
+  @@index([fromAssetId, toAssetId])
+  @@index([status])
+  @@map("liquidity_configurations")
+}
+
+model WithdrawPricingQuote {
+  id              String                @id @default(uuid())
+  quoteNo         String                @unique
+  status          String                @default("ACTIVE")
+  ownerType       String
+  ownerId         String
+  ownerNo         String?
+  assetId         String
+  assetCode       String
+  amount          Decimal
+  segment         String
+  riskTier        String
+  matchedAssetId  String
+  matchedTierId   String
+  matchedTierName String
+  feeBreakdown    String
+  totalsJson      String
+  policyRef       String
+  expiresAt       DateTime
+  usedAt          DateTime?
+  cancelledAt     DateTime?
+  feeLevelId      String?
+  feeLevelCode    String?
+  createdAt       DateTime              @default(now())
+  updatedAt       DateTime              @updatedAt
+  asset           Asset                 @relation(fields: [assetId], references: [id])
+  withdrawals     WithdrawTransaction[]
+
+  @@index([status, expiresAt])
+  @@index([ownerType, ownerId])
+  @@index([assetId, createdAt])
+  @@map("withdraw_pricing_quotes")
+}
+
+model Wallet {
+  id                                       String                          @id @default(uuid())
+  walletNo                                 String?                         @unique
+  ownerType                                String
+  ownerId                                  String?
+  ownerNo                                  String?
+  type                                     String
+  walletRole                               String                          @default("GENERAL")
+  assetId                                  String
+  address                                  String?
+  bankName                                 String?
+  status                                   String                          @default("ACTIVE")
+  mockBalance                              Decimal                         @default(0)
+  createdAt                                DateTime                        @default(now()) @map("created_at")
+  updatedAt                                DateTime                        @updatedAt @map("updated_at")
+  accountName                              String?
+  iban                                     String?
+  vaultId                                  String?
+  depositTransactions                      DepositTransaction[]
+  depositTransactionsFrom                  DepositTransaction[]            @relation("DepositFromWallet")
+  payins                                   Payin[]                         @relation("PayinToWallet")
+  payinsFrom                               Payin[]                         @relation("PayinFromWallet")
+  internalTransactionsFrom                 InternalTransaction[]           @relation("InternalTxFromWallet")
+  internalTransactionsTo                   InternalTransaction[]           @relation("InternalTxToWallet")
+  internalFundsFrom                        InternalFund[]                  @relation("InternalFundFromWallet")
+  internalFundsTo                          InternalFund[]                  @relation("InternalFundToWallet")
+  regulatoryGateItems                      RegulatoryGateItem[]            @relation("RegulatoryGateWallet")
+  asset                                    Asset                           @relation(fields: [assetId], references: [id])
+  inboundTransferSignals                   InboundTransferSignal[]
+
+  @@index([ownerType, ownerId])
+  @@index([assetId])
+  @@index([status])
+  @@map("wallets")
+}
+
+model WithdrawalAddress {
+  id                   String       @id @default(uuid())
+  addressNo            String       @unique
+  customerId           String
+  customerNo           String
+  assetId              String
+  network              String
+  address              String
+  addressType          String
+  label                String?
+  beneficiaryName      String?
+  memo                 String?
+
+  iban                 String?
+  swiftBic             String?
+  bankName             String?
+
+  counterpartyVaspName String?
+  counterpartyVaspDid  String?
+
+  ownershipDeclaredAt  DateTime?
+  ownershipProofType   String?
+
+  status               String       @default("PENDING_ACTIVATION")
+  activatesAt          DateTime
+  activatedAt          DateTime?
+  suspendedAt          DateTime?
+  suspendedBy          String?
+  suspendReason        String?
+  cancelledAt          DateTime?
+
+  traceId              String
+
+  createdAt            DateTime     @default(now()) @map("created_at")
+  updatedAt            DateTime     @updatedAt @map("updated_at")
+
+  customer             CustomerMain @relation(fields: [customerId], references: [id])
+  asset                Asset        @relation(fields: [assetId], references: [id])
+
+  @@unique([customerId, assetId, address])
+  @@index([customerId, assetId, status])
+  @@index([status, activatesAt])
+  @@map("withdrawal_addresses")
+}
+
+model InboundTransferSignal {
+  id                   String       @id @default(uuid())
+  signalNo             String       @unique @default("TEMP")
+  ownerId              String
+  walletId             String
+  assetId              String
+  channelType          String
+  amount               Decimal
+  txHash               String?
+  referenceNo          String?
+  fromAddress          String?
+  fromIban             String?
+  simulationRiskLevel  String?
+  simulationRiskReason String?
+  status               String       @default("PENDING_SCAN")
+  dedupeKey            String       @unique
+  linkedPayinId        String?
+  submittedAt          DateTime     @default(now())
+  lastScannedAt        DateTime?
+  scanResult           String?
+  createdAt            DateTime     @default(now())
+  updatedAt            DateTime     @updatedAt
+  customer             CustomerMain @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  wallet               Wallet       @relation(fields: [walletId], references: [id], onDelete: Cascade)
+  asset                Asset        @relation(fields: [assetId], references: [id])
+  payin                Payin?       @relation(fields: [linkedPayinId], references: [id], onDelete: SetNull)
+
+  @@index([ownerId, walletId, status])
+  @@index([walletId, submittedAt])
+  @@index([linkedPayinId])
+  @@index([txHash])
+  @@index([referenceNo])
+  @@map("inbound_transfer_signals")
+}
+
+model DepositTransaction {
+  id                   String            @id @default(uuid())
+  depositNo            String            @unique
+  ownerType            String
+  ownerId              String
+  status               String
+  assetId              String
+  toWalletId           String
+  payinId              String?           @unique
+  amount               Decimal
+  netAmount            Decimal           @default(0)
+  feeAmount            Decimal           @default(0)
+  fromWalletId         String?
+  fromAddress          String?
+  fromIban             String?
+  toAddress            String?
+  toIban               String?
+  txHash               String?
+  referenceNo          String?
+  expiresAt            DateTime?
+  kytStatus            String            @default("PENDING")
+  kytScreeningId       String?
+  kytRiskScore         Int?
+  kytCheckedAt         DateTime?
+  travelRuleRequired   Boolean           @default(false)
+  travelRuleStatus     String            @default("NOT_REQUIRED")
+  travelRuleTransferId String?
+  counterpartyVasp     String?
+  travelRuleCheckedAt  DateTime?
+  traceId              String?
+  statusHistory        String?
+  aggregatedAt         DateTime?
+  aggregatedTransferId String?
+  createdAt            DateTime          @default(now())
+  updatedAt            DateTime          @updatedAt
+  completedAt          DateTime?
+  payin                Payin?            @relation("PayinToDeposit", fields: [payinId], references: [id])
+  asset                Asset             @relation(fields: [assetId], references: [id])
+  wallet               Wallet            @relation(fields: [toWalletId], references: [id])
+  fromWallet           Wallet?           @relation("DepositFromWallet", fields: [fromWalletId], references: [id])
+  customer             CustomerMain      @relation(fields: [ownerId], references: [id])
+
+  @@index([depositNo])
+  @@index([ownerType, ownerId])
+  @@index([status])
+  @@index([createdAt])
+  @@index([toWalletId, status, aggregatedAt])
+  @@map("deposit_transactions")
+}
+
+model InternalTransaction {
+  id                         String                        @id @default(uuid())
+  internalTxNo               String                        @unique
+  type                       String
+  purpose                    String?
+  initiationMode             String?
+  status                     String
+  approvalStatus             String                        @default("APPROVED")
+  approvalCaseId             String?                       @unique
+  makerUserId                String?
+  checkerUserId              String?
+  checkedAt                  DateTime?
+  reviewReason               String?
+  sourceType                 String
+  sourceId                   String
+  sourceNo                   String?
+  ownerType                  String
+  ownerId                    String
+  ownerNo                    String?
+  assetId                    String
+  amount                     Decimal
+  feeAmount                  Decimal                       @default(0)
+  netAmount                  Decimal
+  fromWalletId               String?
+  fromAddress                String?
+  fromIban                   String?
+  toWalletId                 String?
+  toAddress                  String?
+  toIban                     String?
+  referenceNo                String?
+  pathLabel                  String?
+  accountingClass            String?
+  medium                     String?
+  triggerSource              String?
+  traceId                    String?
+  statusHistory              String?
+  createdAt                  DateTime                      @default(now())
+  completedAt                DateTime?
+  updatedAt                  DateTime                      @updatedAt
+  settlementBatchId          String?
+  grossInAmount              Decimal?
+  grossOutAmount             Decimal?
+  asset                      Asset                         @relation(fields: [assetId], references: [id])
+  approvalCase               ApprovalCase?                 @relation("InternalTransactionApprovalCase", fields: [approvalCaseId], references: [id], onDelete: SetNull)
+  fromWallet                 Wallet?                       @relation("InternalTxFromWallet", fields: [fromWalletId], references: [id])
+  toWallet                   Wallet?                       @relation("InternalTxToWallet", fields: [toWalletId], references: [id])
+  funds                      InternalFund[]
+  auditLogs                  InternalTransactionAuditLog[]
+  settlementBatch            SettlementBatch?              @relation("SettlementBatchTransfers", fields: [settlementBatchId], references: [id], onDelete: SetNull)
+  settledOutstandings        Outstanding[]                 @relation("OutstandingSettledByTransfer")
+  feeAccrualsSettled         FeeAccrual[]                  @relation("FeeAccrualSettledByTransfer")
+
+  @@unique([sourceType, sourceId, type])
+  @@index([status])
+  @@index([approvalStatus])
+  @@index([approvalCaseId])
+  @@index([createdAt])
+  @@index([assetId])
+  @@index([pathLabel])
+  @@index([traceId])
+  @@index([settlementBatchId])
+  @@map("internal_transactions")
+}
+
+model InternalFund {
+  id                    String                 @id @default(uuid())
+  internalFundNo        String                 @unique
+  internalTransactionId String?
+  swapTransactionId     String?
+  withdrawTransactionId String?
+  legSeq                Int?
+  attempt               Int                    @default(1)
+  status                String
+  assetId               String
+  amount                Decimal
+  feeAmount             Decimal                @default(0)
+  netAmount             Decimal
+  fromWalletId          String?
+  fromAddress           String?
+  fromIban              String?
+  toWalletId            String?
+  toAddress             String?
+  toIban                String?
+  txHash                String?
+  confirmations         Int                    @default(0)
+  referenceNo           String?
+  providerTxnId         String?
+  nonce                 String?
+  blockNo               String?
+  gasUsed               String?
+  effectiveGasPrice     String?
+  sentAt                DateTime?
+  confirmedAt           DateTime?
+  completedAt           DateTime?
+  statusHistory         String?
+  createdAt             DateTime               @default(now())
+  updatedAt             DateTime               @updatedAt
+  internalTransaction   InternalTransaction?   @relation(fields: [internalTransactionId], references: [id], onDelete: Cascade)
+  swapTransaction       SwapTransaction?       @relation("SwapInternalFunds", fields: [swapTransactionId], references: [id], onDelete: Cascade)
+  withdrawTransaction   WithdrawTransaction?   @relation("WithdrawInternalFunds", fields: [withdrawTransactionId], references: [id], onDelete: Cascade)
+  asset                 Asset                  @relation(fields: [assetId], references: [id])
+  fromWallet            Wallet?                @relation("InternalFundFromWallet", fields: [fromWalletId], references: [id])
+  toWallet              Wallet?                @relation("InternalFundToWallet", fields: [toWalletId], references: [id])
+  auditLogs             InternalFundAuditLog[]
+  closedOutstandings    Outstanding[]
+  closedFeeAccruals     FeeAccrual[]           @relation("FeeAccrualClosedByFund")
+
+  @@index([internalTransactionId])
+  @@index([swapTransactionId])
+  @@index([withdrawTransactionId])
+  @@index([status])
+  @@index([txHash])
+  @@index([createdAt])
+  @@map("internal_funds")
+}
+
+model InternalTransactionAuditLog {
+  id                    String              @id @default(uuid())
+  internalTransactionId String
+  operatorId            String
+  oldStatus             String
+  newStatus             String
+  reason                String?
+  createdAt             DateTime            @default(now())
+  internalTransaction   InternalTransaction @relation(fields: [internalTransactionId], references: [id], onDelete: Cascade)
+
+  @@index([internalTransactionId])
+  @@map("internal_transaction_audit_logs")
+}
+
+model InternalFundAuditLog {
+  id             String       @id @default(uuid())
+  internalFundId String
+  operatorId     String
+  oldStatus      String
+  newStatus      String
+  reason         String?
+  createdAt      DateTime     @default(now())
+  internalFund   InternalFund @relation(fields: [internalFundId], references: [id], onDelete: Cascade)
+
+  @@index([internalFundId])
+  @@map("internal_fund_audit_logs")
+}
+
+
+model SwapQuote {
+  id              String           @id @default(uuid())
+  quoteNo         String?          @unique
+  quoteType       String           @default("FIRM")
+  status          String           @default("ACTIVE")
+  ownerType       String
+  ownerId         String
+  ownerNo         String?
+  fromAssetId     String
+  fromAssetCode   String
+  toAssetId       String
+  toAssetCode     String
+  side            String           @default("SELL_BASE")
+  amountType      String           @default("EXACT_IN")
+  amountIn        Decimal
+  currencyIn      String
+  amountOut       Decimal
+  currencyOut     String
+  rateDisplay     Decimal
+  rateAllIn       Decimal
+  marketRate      Decimal
+  spreadPercent   Decimal          @default(0)
+  spreadBps       Int              @default(0)
+  rateSource      String           @default("BINANCE")
+  fetchedAt       DateTime
+  feeTotal        Decimal          @default(0)
+  feeCurrency     String
+  feeBreakdown    String?
+  totalsJson      String           @default("{}")
+  policyRef       String           @default("{}")
+  feeLevelId      String?
+  feeLevelCode    String?
+  expiresAt       DateTime
+  usedAt          DateTime?
+  cancelledAt     DateTime?
+  traceId         String?
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  fromAsset       Asset            @relation("SwapQuoteFromAsset", fields: [fromAssetId], references: [id])
+  toAsset         Asset            @relation("SwapQuoteToAsset", fields: [toAssetId], references: [id])
+  swapTransaction SwapTransaction?
+
+  @@index([ownerType, ownerId])
+  @@index([status, expiresAt])
+  @@index([createdAt])
+  @@map("swap_quotes")
+}
+
+model SwapTransaction {
+  id               String        @id @default(uuid())
+  swapNo           String?       @unique
+  quoteId          String?       @unique @map("quote_id")
+  quoteNo          String?
+  quoteSnapshotRef String?
+  ownerType        String
+  ownerId          String
+  ownerNo          String?
+  status           String
+  currentStage     String?
+  needsReview      Boolean          @default(false)
+  fromAssetId      String
+  fromAssetCode    String?
+  fromAmount       Decimal
+  toAssetId        String
+  toAssetCode      String?
+  toAmount         Decimal
+  netToAmount      Decimal?
+  feeAmount        Decimal?
+  feeCurrency      String?
+  feeBreakdown     String?
+  exchangeRate     Decimal
+  riskDecisionRef  String?
+  failureCode      String?
+  failureReason    String?
+  statusHistory    String?
+  spreadAmount     Decimal?
+  tbFromTransferId String?
+  tbToTransferId   String?
+  tbFeeTransferId  String?
+  tbSpreadTransferId String?
+  traceId          String?
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+  completedAt      DateTime?
+  fromAsset        Asset         @relation("SwapFromAsset", fields: [fromAssetId], references: [id])
+  toAsset          Asset         @relation("SwapToAsset", fields: [toAssetId], references: [id])
+  quote            SwapQuote?    @relation(fields: [quoteId], references: [id])
+  customer         CustomerMain? @relation(fields: [ownerId], references: [id])
+  outstandings     Outstanding[]
+  internalFunds    InternalFund[] @relation("SwapInternalFunds")
+
+  @@index([swapNo])
+  @@index([ownerType, ownerId])
+  @@index([ownerNo])
+  @@index([fromAssetCode])
+  @@index([toAssetCode])
+  @@index([status])
+  @@index([createdAt])
+  @@map("swap_transactions")
+}
+
+model Outstanding {
+  id                            String                     @id @default(uuid())
+  outstandingNo                 String?                    @unique
+  sourceType                    String
+  sourceId                      String
+  sourceNo                      String?
+  ownerType                     String
+  ownerId                       String
+  ownerNo                       String?
+  direction                     String
+  assetId                       String
+  assetCode                     String?
+  amount                        Decimal
+  // status now includes 'SETTLED' (set by V7 EOD settlement batch closeout).
+  status                        String                     @default("OPEN")
+  swapTransactionId             String?
+  settlementBatchId             String?
+  settledByTransferId           String?
+  lockedAt                      DateTime?
+  closedAt                      DateTime?
+  closedByInternalFundId        String?
+  originTraceId                 String?
+  createdAt                     DateTime                   @default(now())
+  updatedAt                     DateTime                   @updatedAt
+  asset                         Asset                      @relation(fields: [assetId], references: [id])
+  swapTransaction               SwapTransaction?           @relation(fields: [swapTransactionId], references: [id])
+  settlementBatch               SettlementBatch?           @relation(fields: [settlementBatchId], references: [id], onDelete: SetNull)
+  settledByTransfer             InternalTransaction?       @relation("OutstandingSettledByTransfer", fields: [settledByTransferId], references: [id], onDelete: SetNull)
+  closedByInternalFund          InternalFund?              @relation(fields: [closedByInternalFundId], references: [id], onDelete: SetNull)
+
+  @@unique([sourceType, sourceId, direction])
+  @@index([status])
+  @@index([ownerType, ownerId])
+  @@index([sourceType, sourceId])
+  @@index([createdAt])
+  @@index([assetId])
+  @@index([swapTransactionId])
+  @@index([settlementBatchId])
+  @@index([settledByTransferId])
+  @@index([closedByInternalFundId])
+  @@map("outstandings")
+}
+
+model SettlementBatch {
+  id                       String                @id @default(uuid())
+  batchNo                  String                @unique
+  settlementType           String                @default("EOD")
+  cutoffAt                 DateTime
+  status                   String                @default("CREATED")
+  requestId                String?               @unique
+  totalAssetCount          Int                   @default(0)
+  settledAssetCount        Int                   @default(0)
+  totalOutstandingCount    Int                   @default(0)
+  settledOutstandingCount  Int                   @default(0)
+  createdAt                DateTime              @default(now())
+  updatedAt                DateTime              @updatedAt
+  completedAt              DateTime?
+  category                 String                @default("PRINCIPAL")
+  totalFeeAccrualCount     Int                   @default(0)
+  settledFeeAccrualCount   Int                   @default(0)
+  traceId                  String?
+  transfers                InternalTransaction[]        @relation("SettlementBatchTransfers")
+  outstandings             Outstanding[]
+  feeAccruals              FeeAccrual[]
+
+  @@index([status])
+  @@index([settlementType])
+  @@map("settlement_batches")
+}
+
+model FeeAccrual {
+  id                     String               @id @default(uuid())
+  feeAccrualNo           String?              @unique
+  sourceType             String
+  sourceId               String
+  sourceNo               String?
+  ownerType              String
+  ownerId                String
+  ownerNo                String?
+  feeKind                String
+  category               String
+  assetId                String
+  assetCode              String?
+  amount                 Decimal
+  status                 String               @default("ACCRUED")
+  settlementBatchId      String?
+  settledByTransferId    String?
+  lockedAt               DateTime?
+  closedAt               DateTime?
+  closedByInternalFundId String?
+  originTraceId          String?
+  createdAt              DateTime             @default(now())
+  updatedAt              DateTime             @updatedAt
+  asset                  Asset                @relation(fields: [assetId], references: [id])
+  settlementBatch        SettlementBatch?     @relation(fields: [settlementBatchId], references: [id], onDelete: SetNull)
+  settledByTransfer      InternalTransaction? @relation("FeeAccrualSettledByTransfer", fields: [settledByTransferId], references: [id], onDelete: SetNull)
+  closedByInternalFund   InternalFund?        @relation("FeeAccrualClosedByFund", fields: [closedByInternalFundId], references: [id], onDelete: SetNull)
+
+  @@unique([sourceType, sourceId, feeKind])
+  @@index([status])
+  @@index([sourceType, sourceId])
+  @@index([assetId])
+  @@index([settlementBatchId])
+  @@index([settledByTransferId])
+  @@map("fee_accruals")
+}
+
+
+model WithdrawTransaction {
+  id                   String                @id @default(uuid())
+  withdrawNo           String                @unique
+  payoutId             String?               @unique
+  payoutNo             String?
+  ownerType            String
+  ownerId              String
+  ownerNo              String?
+  status               String
+  assetId              String
+  amount               Decimal
+  feeAmount            Decimal               @default(0)
+  netAmount            Decimal
+  toWalletId           String?
+  toWalletNo           String?
+  toAddress            String?
+  toIban               String?
+  fromWalletId         String?
+  fromWalletNo         String?
+  fromAddress          String?
+  fromIban             String?
+  providerTxnId        String?
+  txHash               String?
+  confirmations        Int                   @default(0)
+  referenceNo          String?
+  preKytStatus         String                @default("PENDING")
+  preKytId             String?
+  preKytRiskScore      Int?
+  preKytCheckedAt      DateTime?
+  kytStatus            String                @default("PENDING")
+  kytScreeningId       String?
+  kytRiskScore         Int?
+  kytCheckedAt         DateTime?
+  travelRuleRequired   Boolean               @default(false)
+  counterpartyVasp     String?
+  travelRuleStatus     String                @default("NOT_REQUIRED")
+  travelRuleTransferId String?
+  travelRuleCheckedAt  DateTime?
+  complianceStatus     String                @default("PENDING")
+  complianceReviewedAt DateTime?
+  traceId              String?
+  grossAedValue        Decimal?
+  aedRate              Decimal?
+  rateFetchedAt        DateTime?
+  rateFetchFailed      Boolean               @default(false)
+  approvalCaseId       String?
+  approvalNo           String?
+  tbPendingNetId       String?
+  tbPendingFeeId       String?
+  parentType           String?
+  parentId             String?
+  pricingQuoteId       String?               @unique
+  createdAt            DateTime              @default(now())
+  approvedAt           DateTime?
+  payoutRequestedAt    DateTime?
+  completedAt          DateTime?
+  statusHistory        String?
+  updatedAt            DateTime              @updatedAt
+  payout               Payout?               @relation("WithdrawToPayout")
+  internalFunds        InternalFund[]        @relation("WithdrawInternalFunds")
+  asset                Asset                 @relation(fields: [assetId], references: [id])
+  pricingQuote         WithdrawPricingQuote? @relation(fields: [pricingQuoteId], references: [id])
+  customer             CustomerMain          @relation(fields: [ownerId], references: [id])
+
+  @@index([withdrawNo])
+  @@index([payoutId])
+  @@index([ownerId])
+  @@index([status])
+  @@index([assetId])
+  @@index([toWalletId])
+  @@index([pricingQuoteId])
+  @@index([providerTxnId])
+  @@index([txHash])
+  @@index([parentId])
+  @@index([createdAt])
+  @@map("withdraw_transactions")
+}
+
+model Payout {
+  id            String              @id
+  payoutNo      String              @unique @default("TEMP")
+  withdrawId    String              @unique
+  ownerId       String? // Added to support relation to CustomerMain
+  type          String
+  status        String              @default("PENDING")
+  amount        Decimal
+  assetId       String
+  toWalletId    String?
+  toAddress     String?
+  toIban        String?
+  fromAddress   String?
+  fromIban      String?
+  txHash        String?
+  confirmations Int                 @default(0)
+  referenceNo   String?
+  providerTxnId String?
+  gasUsed           String?
+  effectiveGasPrice String?
+  createdAt     DateTime            @default(now())
+  sentAt        DateTime?
+  updatedAt     DateTime            @updatedAt
+  completedAt   DateTime?
+  statusHistory String?
+  withdraw      WithdrawTransaction @relation("WithdrawToPayout", fields: [withdrawId], references: [id])
+  asset         Asset               @relation(fields: [assetId], references: [id])
+  customer      CustomerMain?       @relation(fields: [ownerId], references: [id])
+
+  @@index([withdrawId])
+  @@index([status])
+  @@index([assetId])
+  @@index([createdAt])
+  @@map("payouts")
+}
+
+model SumsubWebhookEvent {
+  id                String    @id @default(cuid())
+  eventNo           String    @unique
+  eventType         String
+  applicantId       String
+  externalUserId    String
+  context           String    @default("ONBOARDING")
+  rawPayload        String
+  receivedAt        DateTime
+  status            String    @default("PENDING")
+  retryCount        Int       @default(0)
+  lastRetryAt       DateTime?
+  lastErrorMessage  String?
+  processedAt       DateTime?
+  dispatchedTo      String?
+  isSimulated       Boolean   @default(false)
+  simulatedByUserId String?
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+
+  @@index([status, createdAt])
+  @@index([applicantId])
+  @@index([externalUserId])
+  @@index([eventType, status])
+  @@map("sumsub_webhook_events")
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Wave 3 Firm-Driven Customer Review (2026-04-09)
+// ═══════════════════════════════════════════════════════════════
+
+model CustomerMaterialHolding {
+  id                   String   @id @default(cuid())
+  holdingNo            String   @unique @default("TEMP")
+  customerId           String
+  customer             CustomerMain @relation("CustomerMaterialHoldings", fields: [customerId], references: [id])
+
+  materialType         String
+  managementMode       String
+
+  verifiedAt           DateTime
+  expiresAt            DateTime?
+  status               String   @default("FRESH")
+
+  sumsubIdDocSetType   String?
+  sumsubDocId          String?
+
+  activeRefreshCycleId String?  @unique
+  activeRefreshCycle   MaterialRefreshCycle? @relation("ActiveRefreshCycle", fields: [activeRefreshCycleId], references: [id])
+
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  refreshCycles        MaterialRefreshCycle[] @relation("HoldingRefreshCycles")
+
+  @@unique([customerId, materialType])
+  @@index([expiresAt, status])
+  @@index([customerId])
+  @@map("customer_material_holdings")
+}
+
+model MaterialRefreshCycle {
+  id                       String   @id @default(cuid())
+  cycleNo                  String   @unique
+  customerId               String
+  customer                 CustomerMain @relation("CustomerMaterialRefreshCycles", fields: [customerId], references: [id])
+
+  holdingId                String
+  holding                  CustomerMaterialHolding @relation("HoldingRefreshCycles", fields: [holdingId], references: [id])
+
+  materialType             String
+
+  status                   String   @default("PENDING_CUSTOMER_EVIDENCE")
+  stage                    String   @default("NUDGE_ONLY")
+  triggerType              String
+
+  createdAt                DateTime @default(now())
+  stageNudgeAt             DateTime?
+  stageUrgentAt            DateTime?
+  stageBlockingAt          DateTime?
+  clearedAt                DateTime?
+  rejectedAt               DateTime?
+  customerSubmittedAt      DateTime?
+  graceExpiresAt           DateTime?
+  resolutionReason         String?
+
+  sumsubActionId           String?
+  sumsubActionLevelName    String?
+  sumsubActionCreatedAt    DateTime?
+
+  triggeredByAssessmentId  String?
+  triggeredByAssessment    ClientRiskAssessment? @relation("AssessmentTriggeredCycles", fields: [triggeredByAssessmentId], references: [id])
+
+  traceId                  String   @unique
+
+  activeForHolding         CustomerMaterialHolding? @relation("ActiveRefreshCycle")
+
+  @@index([customerId, status])
+  @@index([status, graceExpiresAt])
+  @@index([sumsubActionId])
+  @@map("material_refresh_cycles")
+}
+
+model ClientRiskAssessment {
+  id                          String   @id @default(cuid())
+  assessmentNo                String   @unique
+  customerId                  String
+  customer                    CustomerMain @relation("CustomerRiskAssessments", fields: [customerId], references: [id])
+
+  triggerType                 String
+  triggeredAt                 DateTime @default(now())
+
+  sumsubAmlCheckRequestedAt   DateTime?
+  sumsubAmlCheckInspectionId  String?
+  sumsubAmlReviewAnswer       String?
+  sumsubAmlLabels             String?  // JSON string
+  sumsubAmlRejectType         String?
+  sumsubSnapshotAt            DateTime?
+  sumsubRiskScore             Int?
+  sumsubTags                  String?  // JSON string
+
+  policyVersion               String
+  resultingRiskTier           String?
+  previousRiskTier            String?
+  scoreSuggestedTier          String?
+  recommendedAction           String?
+  reasoning                   String?  // JSON string
+
+  status                      String   @default("PENDING_SUMSUB_RESULT")
+  signoffMethod               String?
+  approvalCaseId              String?
+  approvalCase                ApprovalCase? @relation("ClientRiskAssessmentApprovalCase", fields: [approvalCaseId], references: [id])
+  signedBy                    String?
+  signedAt                    DateTime?
+  signedUnderPolicyVersion    String?
+
+  sumsubInternalCaseRef       String?
+  sumsubCaseFinalDecision     String?
+  sumsubCaseDecidedAt         DateTime?
+
+  triggeredRefreshCycles      MaterialRefreshCycle[] @relation("AssessmentTriggeredCycles")
+  tierUpgradeCase             TierUpgradeCase? @relation("CraTierUpgradeCase")
+
+  traceId                     String   @unique
+  createdAt                   DateTime @default(now())
+
+  @@index([customerId, status])
+  @@index([customerId, triggeredAt])
+  @@index([sumsubAmlCheckInspectionId])
+  @@index([status, triggeredAt])
+  @@map("client_risk_assessments")
+}
+
+model TierUpgradeCase {
+  id                   String    @id @default(cuid())
+  caseNo               String    @unique
+  customerId           String
+  customer             CustomerMain @relation("CustomerTierUpgradeCases", fields: [customerId], references: [id])
+  sourceCraId          String    @unique
+  sourceCra            ClientRiskAssessment @relation("CraTierUpgradeCase", fields: [sourceCraId], references: [id])
+
+  // PENDING_LEVEL2 | PENDING_PHASE2_APPROVAL | COMPLETED | REJECTED
+  status               String    @default("PENDING_LEVEL2")
+
+  phase2ApprovalCaseId String?   @unique
+  phase2ApprovalCase   ApprovalCase? @relation("TierUpgradeCaseApproval", fields: [phase2ApprovalCaseId], references: [id])
+
+  completedAt          DateTime?
+  rejectedAt           DateTime?
+  rejectedReason       String?
+  traceId              String    @unique
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  @@index([customerId, status])
+  @@map("tier_upgrade_cases")
+}
+
+model RoleDefinitionModifyRequest {
+  id                       String    @id @default(uuid())
+  requestNo                String    @unique @default("TEMP")
+  roleId                   String
+  currentName              String
+  currentDescription       String?
+  currentPermissionGroups  String
+  proposedName             String
+  proposedDescription      String?
+  proposedPermissionGroups String
+  changeReason             String
+  status                   String    @default("PENDING_APPROVAL")
+  approvalCaseId           String?
+  approvalCaseNo           String?
+  requestedByUserId        String
+  executedAt               DateTime?
+  failureReason            String?
+  createdAt                DateTime  @default(now())
+  updatedAt                DateTime  @updatedAt
+
+  role Role @relation(fields: [roleId], references: [id])
+
+  @@index([roleId, status])
+  @@map("role_definition_modify_requests")
+}
+
+// ── TigerBeetle Infrastructure (V3 Phase 0) ──
+
+model TbAccountRegistry {
+  tbAccountId String   @id              // TB u128 as hex string
+  code        Int                       // TB account type code (u16)
+  ledger      Int                       // TB ledger ID (u32): 1=AED, 2=USDT
+  ownerType   String                    // SYSTEM | CUSTOMER | LP
+  ownerUuid   String?                   // Prisma entity UUID (queryable)
+  ownerNo     String?                   // Human-readable No
+  assetCode   String                    // AED | USDT
+  status      String   @default("ACTIVE")
+  description String?
+  flags       Int      @default(0)      // TB account flags
+  createdAt   DateTime @default(now())
+
+  @@unique([code, ledger, ownerType, ownerUuid])
+  @@index([ownerUuid])
+  @@index([ownerNo])
+  @@map("tb_account_registry")
+}
+
+model TbTransferEvidence {
+  tbTransferId String   @id             // TB u128 as hex string (deterministic)
+  sourceType   String                   // DEPOSIT | WITHDRAWAL | SWAP | ...
+  sourceNo     String
+  eventCode    String                   // From events.manifest
+  debitCode    String                   // Human-readable COA, e.g. 'L.CLIENT_CREDIT'
+  creditCode   String                   // e.g. 'A.CUSTODY'
+  debitTbAccountId  String?             // TB account hex ID for debit side
+  creditTbAccountId String?             // TB account hex ID for credit side
+  amount       Decimal
+  assetCode    String
+  traceId      String
+  actorType    String                   // ADMIN | CUSTOMER | SYSTEM
+  actorId      String                   // adminNo / customerNo / 'SYSTEM'
+  memo         String?
+  pendingId    String?                  // Related pending transfer hex ID
+  transferType String   @default("POSTED") // POSTED | PENDING | POST_PENDING | VOID_PENDING | CORRECTING
+  // Phase B per-physical-wallet reconciliation:
+  // walletRef = physical wallet identifier each leg sits on (customer wallet id, or firm wallet code)
+  // externalRef = blockchain txHash / bank statement ref when this leg truly crosses an external boundary
+  // isExternalCrossing = true only for legs whose movement appears on an external statement (deposit credit, withdraw send)
+  debitWalletRef     String?
+  creditWalletRef    String?
+  externalRef        String?
+  isExternalCrossing Boolean  @default(false)
+  createdAt    DateTime @default(now())
+
+  @@index([sourceType, sourceNo])
+  @@index([traceId])
+  @@index([eventCode])
+  @@index([assetCode])
+  @@index([actorType, actorId])
+  @@index([createdAt])
+  @@index([debitWalletRef])
+  @@index([creditWalletRef])
+  @@index([externalRef])
+  @@map("tb_transfer_evidence")
+}
+
+// Phase B reconciliation projection: 2 rows per TB transfer (debit→OUT, credit→IN).
+// Lets per-wallet drill-down do a single indexed query instead of OR-filtering
+// tb_transfer_evidence and computing direction at read time. Idempotency is
+// enforced by (tbTransferId, tbAccountId) — a transfer's two legs hit two
+// different accounts, but re-projecting the same evidence is a no-op upsert.
+model AccountFlow {
+  id                   String   @id @default(uuid())
+  tbTransferId         String
+  tbAccountId          String
+  walletRef            String?
+  direction            String   // 'IN' | 'OUT'
+  amount               Decimal
+  isExternalCrossing   Boolean  @default(false)
+  externalRef          String?
+  eventCode            String
+  sourceType           String
+  sourceNo             String
+  transferType         String   // 'POSTED' | 'PENDING' | 'POST_PENDING' | 'VOID_PENDING'
+  assetCode            String
+  createdAt            DateTime
+
+  @@unique([tbTransferId, tbAccountId])
+  @@index([tbAccountId, createdAt])
+  @@index([walletRef])
+  @@index([externalRef])
+  @@index([tbTransferId])
+  @@map("account_flows")
+}
+
+model TbEvidenceBacklog {
+  id           String    @id @default(uuid())
+  tbTransferId String    @unique         // TB u128 as hex string
+  transferData String                    // JSON: transfer params snapshot
+  evidenceData String                    // JSON: evidence data to write
+  errorMessage String
+  retryCount   Int       @default(0)
+  status       String    @default("PENDING") // PENDING | RESOLVED | FAILED
+  createdAt    DateTime  @default(now())
+  resolvedAt   DateTime?
+
+  @@index([status])
+  @@map("tb_evidence_backlog")
+}
+
+// ─── Transaction Limit Policy (2026-05-16) ──────────────────
+model TransactionLimitPolicy {
+  id              String   @id @default(uuid())
+  policyNo        String   @unique
+  tradingTier     String                         // BASIC | PREMIUM
+  operationType   String                         // WITHDRAWAL | SWAP
+  period          String                         // DAILY
+  limitAmount     Decimal
+  status          String   @default("ACTIVE")    // ACTIVE | PENDING_APPROVAL
+  approvalCaseId  String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([tradingTier, operationType, period])
+  @@index([status])
+  @@map("transaction_limit_policies")
+}
+
+model TransactionLimitChangeRequest {
+  id                String    @id @default(uuid())
+  requestNo         String    @unique @default("TEMP")
+  policyId          String
+  policyNo          String
+  currentAmount     Decimal
+  proposedAmount    Decimal
+  changeReason      String
+  status            String    @default("PENDING_APPROVAL")
+  requestedByUserId String
+  approvalCaseId    String?
+  approvalCaseNo    String?
+  executedAt        DateTime?
+  failureReason     String?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  @@index([policyId, status])
+  @@map("transaction_limit_change_requests")
+}
+
+// ─── Withdrawal Fee Level (2026-05-30) ─────────────────────
+model WithdrawalFeeLevel {
+  id               String    @id @default(uuid())
+  levelCode        String    @unique
+  name             String
+  assetId          String
+  isDefault        Boolean   @default(false)
+  enabled          Boolean   @default(true)
+  tiersJson        String
+  configHash       String
+  status           String    @default("PENDING_APPROVAL")
+  approvalCaseId   String?
+  approvalCaseNo   String?
+  createdByUserId  String
+  updatedByUserId  String?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  asset            Asset     @relation(fields: [assetId], references: [id])
+  bindings         WithdrawalFeeLevelBinding[]
+  changeRequests   WithdrawalFeeLevelChangeRequest[]
+
+  @@index([assetId, status, enabled])
+  @@map("withdrawal_fee_levels")
+}
+
+model WithdrawalFeeLevelChangeRequest {
+  id                 String    @id @default(uuid())
+  requestNo          String    @unique @default("TEMP")
+  levelId            String
+  levelCode          String
+  currentTiersJson   String
+  currentConfigHash  String
+  proposedTiersJson  String
+  changeReason       String
+  status             String    @default("PENDING_APPROVAL")
+  requestedByUserId  String
+  approvalCaseId     String?
+  approvalCaseNo     String?
+  executedAt         DateTime?
+  failureReason      String?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  level              WithdrawalFeeLevel @relation(fields: [levelId], references: [id])
+
+  @@index([levelId, status])
+  @@map("withdrawal_fee_level_change_requests")
+}
+
+model WithdrawalFeeLevelBinding {
+  id              String   @id @default(uuid())
+  customerId      String
+  levelId         String
+  boundByUserId   String
+  boundAt         DateTime @default(now())
+  createdAt       DateTime @default(now())
+
+  customer        CustomerMain             @relation(fields: [customerId], references: [id])
+  level           WithdrawalFeeLevel   @relation(fields: [levelId], references: [id])
+
+  @@unique([customerId, levelId])
+  @@index([customerId])
+  @@index([levelId])
+  @@map("withdrawal_fee_level_bindings")
+}
+
+// ─── Swap Fee Level (2026-05-31) ─────────────────────
+model SwapFeeLevel {
+  id               String    @id @default(uuid())
+  levelCode        String    @unique
+  name             String
+  fromAssetId      String
+  toAssetId        String
+  isDefault        Boolean   @default(false)
+  enabled          Boolean   @default(true)
+  tiersJson        String
+  configHash       String
+  status           String    @default("PENDING_APPROVAL")
+  approvalCaseId   String?
+  approvalCaseNo   String?
+  createdByUserId  String
+  updatedByUserId  String?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  fromAsset        Asset     @relation("SwapFeeLevelFromAsset", fields: [fromAssetId], references: [id])
+  toAsset          Asset     @relation("SwapFeeLevelToAsset", fields: [toAssetId], references: [id])
+  bindings         SwapFeeLevelBinding[]
+  changeRequests   SwapFeeLevelChangeRequest[]
+
+  @@index([fromAssetId, toAssetId, status, enabled])
+  @@map("swap_fee_levels")
+}
+
+model SwapFeeLevelChangeRequest {
+  id                 String    @id @default(uuid())
+  requestNo          String    @unique @default("TEMP")
+  levelId            String
+  levelCode          String
+  currentTiersJson   String
+  currentConfigHash  String
+  proposedTiersJson  String
+  changeReason       String
+  status             String    @default("PENDING_APPROVAL")
+  requestedByUserId  String
+  approvalCaseId     String?
+  approvalCaseNo     String?
+  executedAt         DateTime?
+  failureReason      String?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  level              SwapFeeLevel @relation(fields: [levelId], references: [id])
+
+  @@index([levelId, status])
+  @@map("swap_fee_level_change_requests")
+}
+
+model SwapFeeLevelBinding {
+  id              String   @id @default(uuid())
+  customerId      String
+  levelId         String
+  boundByUserId   String
+  boundAt         DateTime @default(now())
+  createdAt       DateTime @default(now())
+
+  customer        CustomerMain @relation(fields: [customerId], references: [id])
+  level           SwapFeeLevel @relation(fields: [levelId], references: [id])
+
+  @@unique([customerId, levelId])
+  @@index([customerId])
+  @@index([levelId])
+  @@map("swap_fee_level_bindings")
+}
+
+model ReconciliationRun {
+  id              String   @id @default(uuid())
+  runNo           String   @unique @default("TEMP")
+  businessDate    String
+  layer           String   // CRYPTO | FIAT
+  seq             Int      @default(1)
+  triggerType     String   // SCHEDULED | MANUAL | POST_FIX
+  mode            String   @default("APPLY") // DRY_RUN | APPLY
+  status          String   @default("RUNNING") // RUNNING | COMPLETED | FAILED
+  invariantStatus String   @default("PASS")    // PASS | FAIL
+  openedCount     Int      @default(0)
+  reObservedCount Int      @default(0)
+  closedCount     Int      @default(0)
+  traceId         String?
+  startedAt       DateTime @default(now())
+  completedAt     DateTime?
+  createdAt       DateTime @default(now())
+  demoManifest    String?  // demo-only: JSON answer-key of injected breaks (null for real/pass runs)
+  cases           ReconciliationCase[] @relation("CaseOpenedByRun")
+  lineItems       ReconciliationLineItem[]
+  @@index([businessDate, layer])
+  @@map("reconciliation_runs")
+}
+
+model ReconciliationCase {
+  id                        String   @id @default(uuid())
+  caseNo                    String   @unique @default("TEMP")
+  businessDate              String
+  assetId                   String
+  assetCode                 String
+  layer                     String
+  book                      String?  // CLIENT | FIRM (redesign per-book case); null for legacy I1–I5 cases
+  tbAmount                  Decimal  @default(0)
+  inTransitAmount           Decimal  @default(0)
+  expectedExternal          Decimal  @default(0)
+  actualExternal            Decimal  @default(0)
+  deltaAmount               Decimal  @default(0)
+  status                    String   @default("OPEN") // OPEN | PENDING_RECHECK | RESOLVED
+  openedByRunId             String
+  closedByRunId             String?
+  lastObservedRunId         String?
+  slaDeadline               DateTime?
+  traceId                   String?
+  reimbursementObligationId String?
+  // Phase B locator — pinpoints which physical wallet / COA bucket / owner this case belongs to
+  // (T7 wallet-level engine fills these; legacy V8_FORMULA cases leave them null).
+  walletRef                 String?
+  coaCode                   String?  // 'L.CLIENT_PAYABLE+L.DEPOSIT_SUSPENSE' | 'E.FIRM_OPS' | ...
+  ownerNo                   String?
+  // T1 idempotency tracking — wallet-level engine reuses one case per (walletRef, businessDate)
+  // across reruns. firstSeenRunId pins the run that opened it; lastUpdatedRunId moves forward each
+  // rerun that re-confirms the break; resolvedAt + resolutionReason close the loop (auto-heal /
+  // manual resolution / waiver); severity classifies for the cockpit. All optional — legacy
+  // V8_FORMULA cases leave them null. T2 wires the upsert; T3 surfaces them via endpoints.
+  firstSeenRunId            String?
+  lastUpdatedRunId          String?
+  resolvedAt                DateTime?
+  resolutionReason          String?  // 'AUTO_HEALED' | 'MANUAL_RESOLVED' | 'WAIVED'
+  severity                  String?  // 'HIGH' | 'MEDIUM' | 'LOW'
+  createdAt                 DateTime @default(now())
+  updatedAt                 DateTime @updatedAt
+  openedByRun               ReconciliationRun @relation("CaseOpenedByRun", fields: [openedByRunId], references: [id])
+  asset                     Asset    @relation(fields: [assetId], references: [id])
+  lineItems                 ReconciliationLineItem[]
+  // T2: dropped @@unique([businessDate, assetId, book]) — Phase B wallet engine
+  // upserts one case per (walletRef, businessDate), so multiple wallets sharing the
+  // same (book, asset, date) each get their own case row. Service-layer idempotency
+  // (findFirst by walletRef + status=OPEN) replaces the DB unique; a DB-level
+  // partial unique (walletRef, businessDate, status=OPEN) is deferred to Phase C
+  // (SQLite expression-index compatibility pending).
+  @@index([businessDate, assetId, book])
+  @@index([status])
+  @@index([walletRef])
+  @@index([walletRef, businessDate, status])
+  @@map("reconciliation_cases")
+}
+
+model ReconciliationLineItem {
+  id               String  @id @default(uuid())
+  caseId           String
+  foundByRunId     String
+  lineNo           Int
+  matchStatus      String  // MATCHED | ORPHAN_INTERNAL | ORPHAN_EXTERNAL | AMOUNT_MISMATCH | INVARIANT
+  internalSourceType String?
+  internalSourceId   String?
+  internalSourceNo   String?
+  internalAmount     Decimal?
+  internalDirection  String?
+  internalTxHash     String?
+  externalSource     String?
+  externalTxId       String?
+  externalTxHash     String?
+  externalAmount     Decimal?
+  externalDirection  String?
+  externalTimestamp  DateTime?
+  // Phase B drill-down hooks — wallet-level engine references these to link a bucketed
+  // line item back to its source (per-wallet evidence row or external statement line).
+  // externalRef = bank booking id / chain tx hash (matches tb_transfer_evidence.externalRef);
+  // walletRef   = which physical wallet this side belongs to.
+  externalRef        String?
+  walletRef          String?
+  status             String  @default("OPEN")
+  resolution         String?
+  resolutionMemo     String?
+  createdAt          DateTime @default(now())
+  case               ReconciliationCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  run                ReconciliationRun  @relation(fields: [foundByRunId], references: [id])
+  @@index([caseId])
+  @@index([externalRef])
+  @@index([walletRef])
+  @@map("reconciliation_line_items")
+}
+
+// 外部余额头表（每外部账户每 cutoff 一行）。对账式4/5 直接用 closing_balance，不靠明细加总。见 spec 2026-06-20 §2.1。
+model ExternalBalance {
+  id             String   @id @default(uuid())
+  source         String   // ZAND | HEXTRUST | CHAIN
+  accountRef     String   @map("account_ref") // 对账主体（法币滚到 CMA，见 §2.5）
+  currency       String   // AED | USDT
+  book           String   // CLIENT | FIRM（按 cutoff 快照映射）
+  cutoffDate     String   @map("cutoff_date") // 业务日 D（YYYY-MM-DD）
+  closingBalance Decimal  @map("closing_balance") // 核这个；Zand 取最新行 Balance
+  openingBalance Decimal? @map("opening_balance") // 连续性 + roll-forward 自检
+  asOfAt         DateTime? @map("as_of_at") // 外部余额精确时点（可能 ≠ cutoff）
+  statementId    String?  @map("statement_id") // 关联原始对账单
+  lineCount      Int?     @map("line_count")
+  ingestedAt     DateTime @default(now()) @map("ingested_at")
+  status         String?
+  rawRef         String?  @map("raw_ref")
+  // Phase B locator — which physical wallet / COA bucket this balance attests to
+  // (T7 wallet-level engine matches per-wallet; legacy V8_FORMULA rows leave them null).
+  walletRef      String?
+  coaCode        String?
+  ownerNo        String?
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+  @@unique([source, accountRef, cutoffDate])
+  @@index([cutoffDate])
+  @@index([source, book, currency])
+  @@index([walletRef])
+  @@map("external_balances")
+}
+
+// 外部对账单归一化行表（每笔一行）。匹配键 = (account, direction, currency, external_ref)，不含金额。见 spec 2026-06-20 §2.2。
+model ExternalStatementLine {
+  id           String   @id @default(uuid())
+  source       String   // ZAND | HEXTRUST | CHAIN
+  accountRef   String   @map("account_ref") // 法币滚到 CMA（用于余额求和）
+  subAccount   String?  @map("sub_account") // 原始 VirtualAccount / walletId（保留！下钻 + 充值模糊配）
+  book         String   // CLIENT | FIRM
+  currency     String
+  direction    String   // IN | OUT（按余额增减，不用银行原始借贷）
+  amount       Decimal
+  externalRef  String?  @map("external_ref") // 出金=你的号(回显)；入金=空(法币)或 txHash(虚拟币)
+  channelRef   String?  @map("channel_ref") // Zand ChannelRefId（出金↔退汇关联，会重复）
+  datetime     DateTime // 精确入账时刻
+  balanceAfter Decimal? @map("balance_after") // 行后余额（法币=主账户级）
+  description  String?  // 分类（Incoming/Outgoing/Return/Intra…）
+  statementId  String?  @map("statement_id")
+  raw          String?  // 原始 json
+  ingestedAt   DateTime @default(now()) @map("ingested_at")
+  dedupKey     String   @map("dedup_key") // 内容组合键或来源 booking id（见 §2.4）
+  @@unique([dedupKey])
+  @@index([source, accountRef])
+  @@index([datetime])
+  @@index([externalRef])
+  @@index([channelRef])
+  @@index([subAccount])
+  @@map("external_statement_lines")
+}
