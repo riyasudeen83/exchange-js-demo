@@ -1,0 +1,33 @@
+﻿services:
+  - type: web
+    name: exchange-js-api
+    runtime: node
+    plan: free
+    branch: main
+    buildCommand: npm install && npm run build
+    startCommand: npx prisma migrate deploy && npm run db:base:sync && npm run start:prod
+    envVars:
+      - key: NODE_VERSION
+        value: 22
+      - key: PORT
+        value: 10000
+      - key: API_PORT
+        value: 10000
+      - key: API_URL
+        value: https://exchange-js-api.onrender.com
+      - key: ADMIN_URL
+        value: https://exchange-js-demo.vercel.app
+      - key: CLIENT_URL
+        value: https://exchange-js-client.vercel.app
+      - key: DATABASE_URL
+        value: file:./dev.db
+      - key: GOVERNANCE_DEMO_ENABLED
+        value: true
+      - key: SUMSUB_MOCK_MODE
+        value: true
+      - key: MFA_ENCRYPTION_KEY
+        value: 0000000000000000000000000000000000000000000000000000000000000000
+      - key: MFA_ISSUER
+        value: Exchange Admin
+      - key: TB_ADDRESS
+        value: 127.0.0.1:3003
