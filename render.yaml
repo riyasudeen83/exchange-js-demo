@@ -4,11 +4,13 @@
     runtime: node
     plan: free
     branch: main
-    buildCommand: npm install && npm run build
-    startCommand: npx prisma migrate deploy && npm run db:base:sync && npm run start:prod
+    buildCommand: npm install && npm run build && npx prisma migrate deploy && npm run db:base:sync
+    startCommand: npm run start:prod
     envVars:
       - key: NODE_VERSION
         value: 22
+      - key: NODE_OPTIONS
+        value: --max-old-space-size=384
       - key: PORT
         value: 10000
       - key: API_PORT
@@ -22,9 +24,9 @@
       - key: DATABASE_URL
         value: file:./dev.db
       - key: GOVERNANCE_DEMO_ENABLED
-        value: true
+        value: "true"
       - key: SUMSUB_MOCK_MODE
-        value: true
+        value: "true"
       - key: MFA_ENCRYPTION_KEY
         value: 0000000000000000000000000000000000000000000000000000000000000000
       - key: MFA_ISSUER
