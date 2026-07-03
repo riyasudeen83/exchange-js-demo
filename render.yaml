@@ -4,13 +4,11 @@
     runtime: node
     plan: free
     branch: main
-    buildCommand: npm install && npm run build && npx prisma migrate deploy && npm run db:base:sync
+    buildCommand: npm install && npm run build
     startCommand: npm run start:prod
     envVars:
       - key: NODE_VERSION
         value: 22
-      - key: NODE_OPTIONS
-        value: --max-old-space-size=384
       - key: PORT
         value: 10000
       - key: API_PORT
