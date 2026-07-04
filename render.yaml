@@ -16,9 +16,9 @@
       - key: API_URL
         value: https://exchange-js-api.onrender.com
       - key: ADMIN_URL
-        value: https://exchange-js-demo.vercel.app
+        value: https://fiatchainadmin.hiranox.com
       - key: CLIENT_URL
-        value: https://exchange-js-client.vercel.app
+        value: https://fiatchainclient.hiranox.com
       - key: DATABASE_URL
         value: file:./dev.db
       - key: GOVERNANCE_DEMO_ENABLED
